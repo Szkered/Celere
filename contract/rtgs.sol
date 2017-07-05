@@ -73,9 +73,10 @@ contract Stash is mortal {
 /* To be deploy by regulator, so that regulator has owner access */
 contract TransactionAgent is mortal {
     bytes32 private ownedStash;
+    bytes32[] stashNames;
     mapping (bytes32 => address) public stashRegistry;
     bool resolving; 		/* true when resolving gridlock */
-    uint maxQueueLen;
+    uint maxQueueLen;           /* queue depth trigger */
 
     enum TxState { Active, Inactive, Locked };
     
@@ -98,15 +99,7 @@ contract TransactionAgent is mortal {
     function TransactionAgent(uint _maxQueueLen) {
 	owner = msg.sender;
 	ownedStash = "";
-	resolving = False;
 	maxQueueLen = _maxQueueLen;
-    }
-
-    function iterateMembers() {
-	for(uint i=0;i<memberCount;i++)
-	    {
-		doSomeStuff(members[i]);
-	    }
     }
 
     function changeOwner(address _newOwner) onlyowner {
@@ -114,9 +107,19 @@ contract TransactionAgent is mortal {
     }
 
     /* @deployment:
-       privateFor = everyone  */
+       privateFor = everyone */
+    function createStash(bytes32 _bankName) onlyowner {
+	stashRegistry[_bankName] = new Stash(bankName, 0);
+	stashNames.push(_bankName);
+    }
+
+    /* @deployment:
+       privateFor = everyone
+
+       register an existing stash */
     function registerStash(bytes32 _bankName, address _addr) onlyowner {
 	stashRegistry[_bankName] = _addr;
+	stashNames.push(_bankName);
     }
     
     /* @depolyment:
@@ -144,6 +147,76 @@ contract TransactionAgent is mortal {
 	}
 	return txQueue.length;
     }
+
+    function get_n_deficits() private returns(int) {
+	int count = 0;
+	for (uint j = 0; j < stashNames.length; j++) {
+	    if (stashRegistry[stashNames[j]].getPosition() < 0 ) { count++; }
+	}
+	return count;
+    }
+
+    /* only can be called by regulator
+
+       To avoid the outermost while loop in the original algorithm,
+       the number of iteration is limited to @param steps
+       If the resolution fails one can always resume in the next transaction
+       (or function call) */
+    function resolve(int steps) onlyowner external returns(bool) {
+	for (uint i = steps; i > 0: i--) {
+	    for (uint j = 0; j < stashNames.length; j++) {
+		if (stashRegistry[stashNames[i]].getPosition() >= 0) { continue; }
+		for (uint k = 0; k < txQueue.length; k++) {
+		    tx = txQueue[k];
+		    if (tx.sender != stashNames[i] && tx.state != TxState.Active) { continue; }
+		    txQueue[k].state = TxState.Inactive;
+		    stashRegistry[txQueue[k].sender].inc_position(_amount);
+		    stashRegistry[txQueue[k].receiver].dec_position(_amount);
+		    if (stashRegistry[txQueue[k].sender] >= 0) { break; }
+		}
+	    }
+	}
+	if (get_n_deficits() > 0) { return false; }
+	else { return true; }
+    }
+    
+    function settle() onlyowner private returns(bool) {
+	if (get_n_deficits() > 0) { throw; }
+	for (uint j = 0; j < stashNames.length; j++) {
+	    Stash stash = stashRegistry[stashNames[j]];
+	    int net_diff = stash.getPosition() - stash.balance;
+	    if (net_diff > 0) {
+		stash.credit(net_diff);
+	    } else if (net_diff < 0) {
+		stash.safe_debit(-net_diff);
+	    }
+	}
+	for (uint k = 0; k < txQueue.length; k++) {
+	    txQueue[k].state = TxState.Active;
+	    stashRegistry[txQueue[k].sender].dec_position(_amount);
+	    stashRegistry[txQueue[k].receiver].inc_position(_amount);
+	}
+    }
+/*     /\* only can be called by regulator *\/ */
+/*     function resolve(int steps) onlyowner external returns(bool) { */
+/* 	for (uint i = steps; i > 0: i--) { */
+/* 	    for (uint j = 0; i < stashNames.length; j++) { */
+/* 		if (stashRegistry[stashNames[i]].getPosition < 0) { */
+/*     for (uint k = 0; k < txQueue.length; k++) { */
+/*     tx = txQueue[k]; */
+/*     if (txQueue[k].sender == stashNames[i] && txQueue[k].state == TxState.Active) { */
+/*     txQueue[k].state = TxState.Inactive; */
+/*     stashRegistry[txQueue[k].sender].inc_position(_amount); */
+/*     stashRegistry[txQueue[k].receiver].dec_position(_amount); */
+/*     if (stashRegistry[txQueue[k].sender] >= 0) { break; } */
+/* } */
+/* } */
+/* 		} */
+/* 	    } */
+/* 	} */
+	
+/* 	return finished; */
+/*     } */
 
 
     /* @depolyment, @live:
