@@ -1,4 +1,4 @@
-pragma solidity ^0.4.2;
+/* pragma solidity ^0.4.2; */
 
 contract owned{
   address owner;
@@ -71,14 +71,14 @@ contract Stash is mortal {
 
 
 /* To be deploy by regulator, so that regulator has owner access */
-contract TransactionAgent is mortal {
+contract PaymentAgent is mortal {
     bytes32 private ownedStash;
-    bytes32[] stashNames;
+    bytes32[] public stashNames;
     mapping (bytes32 => address) public stashRegistry;
     bool resolving; 		/* true when resolving gridlock */
     uint maxQueueLen;           /* queue depth trigger */
 
-    enum TxState { Active, Inactive, Locked };
+    enum TxState { Active, Inactive, Locked }
     
     struct Tx {
         bytes32 txRef; 
@@ -94,9 +94,9 @@ contract TransactionAgent is mortal {
 	if(ownedStash == _sender || ownedStash == _receiver) _;
     }
 
-    modifier isPositive(int _amount) { if (_amount < 0 ) throw; }
+    modifier isPositive(int _amount) { if (_amount < 0 ) throw;_; }
 
-    function TransactionAgent(uint _maxQueueLen) {
+    function PaymentAgent(uint _maxQueueLen) {
 	owner = msg.sender;
 	ownedStash = "";
 	maxQueueLen = _maxQueueLen;
@@ -109,8 +109,13 @@ contract TransactionAgent is mortal {
     /* @deployment:
        privateFor = everyone */
     function createStash(bytes32 _bankName) onlyowner {
-	stashRegistry[_bankName] = new Stash(bankName, 0);
+	address stash = new Stash(_bankName, 0);
+	stashRegistry[_bankName] = stash;
 	stashNames.push(_bankName);
+    }
+
+    function getStashName(uint index) returns(bytes32) {
+	return stashNames[index];
     }
 
     /* @deployment:
@@ -118,7 +123,7 @@ contract TransactionAgent is mortal {
 
        register an existing stash */
     function registerStash(bytes32 _bankName, address _addr) onlyowner {
-	stashRegistry[_bankName] = _addr;
+	stashRegistry[_bankName] = Stash(_addr);
 	stashNames.push(_bankName);
     }
     
@@ -139,19 +144,20 @@ contract TransactionAgent is mortal {
 	txQueue[txQueue.length-1].amount = _amount;
 	txQueue[txQueue.length-1].state = TxState.Active;
 	/* update position */
-	stashRegistry[_sender].dec_position(_amount);
-	stashRegistry[_receiver].inc_position(_amount);
+	/* Stash sender = Stash(stashRegistry[_sender]).dec; */
+	Stash(stashRegistry[_sender]).dec_position(_amount);
+	Stash(stashRegistry[_receiver]).inc_position(_amount);
 	/* decide whether to resolve gridlock */
-	if (txQueue.length >= maxQueueLen) {
-	    resolve();
-	}
+	/* if (txQueue.length >= maxQueueLen) { */
+	/*     resolve(); */
+	/* } */
 	return txQueue.length;
     }
 
     function get_n_deficits() private returns(int) {
 	int count = 0;
 	for (uint j = 0; j < stashNames.length; j++) {
-	    if (stashRegistry[stashNames[j]].getPosition() < 0 ) { count++; }
+	    if (Stash(stashRegistry[stashNames[j]]).getPosition() < 0 ) { count++; }
 	}
 	return count;
     }
@@ -163,16 +169,16 @@ contract TransactionAgent is mortal {
        If the resolution fails one can always resume in the next transaction
        (or function call) */
     function resolve(int steps) onlyowner external returns(bool) {
-	for (uint i = steps; i > 0: i--) {
+	for (int i = steps; i > 0; i--) {
 	    for (uint j = 0; j < stashNames.length; j++) {
-		if (stashRegistry[stashNames[i]].getPosition() >= 0) { continue; }
+		if (Stash(stashRegistry[stashNames[j]]).getPosition() >= 0) { continue; }
 		for (uint k = 0; k < txQueue.length; k++) {
-		    tx = txQueue[k];
-		    if (tx.sender != stashNames[i] && tx.state != TxState.Active) { continue; }
+		    var tx = txQueue[k];
+		    if (tx.sender != stashNames[j] && tx.state != TxState.Active) { continue; }
 		    txQueue[k].state = TxState.Inactive;
-		    stashRegistry[txQueue[k].sender].inc_position(_amount);
-		    stashRegistry[txQueue[k].receiver].dec_position(_amount);
-		    if (stashRegistry[txQueue[k].sender] >= 0) { break; }
+		    Stash(stashRegistry[txQueue[k].sender]).inc_position(tx.amount);
+		    Stash(stashRegistry[txQueue[k].receiver]).dec_position(tx.amount);
+		    if (Stash(stashRegistry[txQueue[k].sender]).getPosition() >= 0) { break; }
 		}
 	    }
 	}
@@ -183,8 +189,8 @@ contract TransactionAgent is mortal {
     function settle() onlyowner private returns(bool) {
 	if (get_n_deficits() > 0) { throw; }
 	for (uint j = 0; j < stashNames.length; j++) {
-	    Stash stash = stashRegistry[stashNames[j]];
-	    int net_diff = stash.getPosition() - stash.balance;
+	    Stash stash = Stash(stashRegistry[stashNames[j]]);
+	    int net_diff = stash.getPosition() - stash.getBalance();
 	    if (net_diff > 0) {
 		stash.credit(net_diff);
 	    } else if (net_diff < 0) {
@@ -193,8 +199,9 @@ contract TransactionAgent is mortal {
 	}
 	for (uint k = 0; k < txQueue.length; k++) {
 	    txQueue[k].state = TxState.Active;
-	    stashRegistry[txQueue[k].sender].dec_position(_amount);
-	    stashRegistry[txQueue[k].receiver].inc_position(_amount);
+	    var tx = txQueue[k];
+	    Stash(stashRegistry[tx.sender]).dec_position(tx.amount);
+	    Stash(stashRegistry[tx.receiver]).inc_position(tx.amount);
 	}
     }
 /*     /\* only can be called by regulator *\/ */
@@ -264,88 +271,88 @@ contract TransactionAgent is mortal {
 
 
 /* Public contract for holding RefData */
-contract RefData is mortal {
+/* contract RefData is mortal { */
     
-    struct transaction {
-	bool exists;
-	uint timestamp;
-	bool active;
-    }
+/*     struct transaction { */
+/* 	bool exists; */
+/* 	uint timestamp; */
+/* 	bool active; */
+/*     } */
 
-    struct Bank {
-	string name;
-	bool authorized;
-	bool exists;
-	address authorizedSender;
-    }
+/*     struct Bank { */
+/* 	string name; */
+/* 	bool authorized; */
+/* 	bool exists; */
+/* 	address authorizedSender; */
+/*     } */
 
-    address public regulator;
+/*     address public regulator; */
     
-    mapping (bytes32 => transaction) public transactions;
+/*     mapping (bytes32 => transaction) public transactions; */
     
-    mapping (address => Bank) public banks;
+/*     mapping (address => Bank) public banks; */
     
-    function addTransaction (bytes32 _transactionID) {
-        transactions[_transactionID].exists=true;
-        transactions[_transactionID].timestamp=block.timestamp;
-        transactions[_transactionID].active=true;
-    }
+/*     function addTransaction (bytes32 _transactionID) { */
+/*         transactions[_transactionID].exists=true; */
+/*         transactions[_transactionID].timestamp=block.timestamp; */
+/*         transactions[_transactionID].active=true; */
+/*     } */
 
-    function getTransactionExistance (bytes32 _transactionID) public constant 
-	returns (bool) {
-        return (transactions[_transactionID].exists);
-    }
+/*     function getTransactionExistance (bytes32 _transactionID) public constant  */
+/* 	returns (bool) { */
+/*         return (transactions[_transactionID].exists); */
+/*     } */
 
-    function getTransactionState (bytes32 _transactionID) public constant 
-	returns (bool) {
-        return (transactions[_transactionID].blocked);
-    }
+/*     function getTransactionState (bytes32 _transactionID) public constant  */
+/* 	returns (bool) { */
+/*         return (transactions[_transactionID].blocked); */
+/*     } */
 
-    function getTransactionTimestamp (bytes32 _transactionID) public constant 
-	returns (uint) {
-        return (transactions[_transactionID].timestamp);
-    }
+/*     function getTransactionTimestamp (bytes32 _transactionID) public constant  */
+/* 	returns (uint) { */
+/*         return (transactions[_transactionID].timestamp); */
+/*     } */
 
-    function bankExist (address _contract) public constant 
-	returns (bool) {
-        return (banks[_contract].exists);
-    }
+/*     function bankExist (address _contract) public constant  */
+/* 	returns (bool) { */
+/*         return (banks[_contract].exists); */
+/*     } */
 
-    function bankAuthorized (address _contract) public constant 
-	returns (bool) {
-        return (banks[_contract].authorized);
-    }
+/*     function bankAuthorized (address _contract) public constant  */
+/* 	returns (bool) { */
+/*         return (banks[_contract].authorized); */
+/*     } */
 
-    function getBankSender (address _contract) public constant 
-	returns (address) {
-        return (banks[_contract].authorizedSender);
-    }
+/*     function getBankSender (address _contract) public constant  */
+/* 	returns (address) { */
+/*         return (banks[_contract].authorizedSender); */
+/*     } */
 
-    function activate(bytes32 _transactionID) onlyowner {
-	if (transactions[_transactionID].exists) {
-	    transactions[_transactionID].active=true;
-	}
-    }
+/*     function activate(bytes32 _transactionID) onlyowner { */
+/* 	if (transactions[_transactionID].exists) { */
+/* 	    transactions[_transactionID].active=true; */
+/* 	} */
+/*     } */
 
-    function inactivate(bytes32 _transactionID) onlyowner {
-	if (transactions[_transactionID].exists) {
-	    transactions[_transactionID].active=false;
-	}
-    }
+/*     function inactivate(bytes32 _transactionID) onlyowner { */
+/* 	if (transactions[_transactionID].exists) { */
+/* 	    transactions[_transactionID].active=false; */
+/* 	} */
+/*     } */
 
-    function addBank (string _name, address _contract, address _sender) onlyowner {
-	banks[_contract].name=_name;
-	banks[_contract].exists=true;
-	banks[_contract].authorized=true;
-	banks[_contract].authorizedSender=_sender;
-    }
+/*     function addBank (string _name, address _contract, address _sender) onlyowner { */
+/* 	banks[_contract].name=_name; */
+/* 	banks[_contract].exists=true; */
+/* 	banks[_contract].authorized=true; */
+/* 	banks[_contract].authorizedSender=_sender; */
+/*     } */
 
-    function blockBank (address _contract) onlyowner {
-	banks[_contract].authorized=false;
-    }
+/*     function blockBank (address _contract) onlyowner { */
+/* 	banks[_contract].authorized=false; */
+/*     } */
 
-    function unblockBank (address _contract) onlyowner {
-	banks[_contract].authorized=true;
-    }
+/*     function unblockBank (address _contract) onlyowner { */
+/* 	banks[_contract].authorized=true; */
+/*     } */
 
-}
+/* } */

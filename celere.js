@@ -12,7 +12,7 @@ module.exports = {
 		{from: web3.eth.accounts[0],
 		 data: contractCompiled[contractName_c].code,
 		 gasPrice: 0,
-		 gas: 300000000,
+		 gas: 600000000,
 		 privateFor: priList},
 		(e, contract) => {
 		    if (e) {
